@@ -6,3 +6,4 @@ target/
 .DS_Store
 next-env.d.ts
 .claude/
+graphify-out/
