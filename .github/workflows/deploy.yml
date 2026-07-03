@@ -83,8 +83,16 @@ jobs:
 
           # BuildKit pulls a fresh base (--pull) and uses the registry-side
           # `latest` image as a layer cache via inline cache metadata.
+          #
+          # --provenance=false --sbom=false: buildx would otherwise attach
+          # SLSA provenance / SBOM attestations, turning the push into a
+          # multi-manifest OCI image index. Artifact Registry rejects that
+          # index on the manifest HEAD with `400 Bad Request`, so emit a
+          # single plain image manifest instead.
           docker buildx build \
             --pull \
+            --provenance=false \
+            --sbom=false \
             --tag "${IMAGE_TAG}" \
             --tag "${IMAGE_LATEST}" \
             --cache-from "type=registry,ref=${IMAGE_LATEST}" \
