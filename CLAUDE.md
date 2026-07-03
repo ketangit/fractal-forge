@@ -28,6 +28,7 @@ Full stack: `docker compose up --build` (port 8080).
 
 ## Gotchas — do not break these
 
+- **Deploy needs GCP secrets**: `.github/workflows/deploy.yml` runs on push to `main` — test job, then build+push image to Artifact Registry via Workload Identity. Requires repo secrets `GCP_PROJECT_ID`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`. Unset → deploy job fails at GCP auth (test job still passes).
 - **SVG parity**: the backend generator reproduces the original JS generator byte-for-byte using `StrictMath.sin` (fdlibm). Golden-file tests in `backend/src/test/resources/golden-*.svg` assert this across seed/shape/size. Any change to generator math must keep these tests green — do not swap `StrictMath` for `Math`.
 - **Static-export build**: `frontend` uses `output: "export"` (`next.config.mjs`). `npm run build` emits `out/`, which the multi-stage `Dockerfile` copies into `backend/src/main/resources/static/`. The combined jar serves frontend at `/` and API at `/api/`.
 - **H2 resets on restart**: in-memory H2 with DDL auto=`create` — DB is wiped every startup. Don't rely on persisted data; swap datasource to Postgres in `application.properties` for prod.
@@ -82,9 +83,3 @@ The 2D preview, 3D preview, and the `COLORED` solution-sheet export all use a sh
 - **`app/designer/page.tsx`** — a **Panel shape** selector (Square tray / Round coaster) and a **Coaster diameter (mm)** field when circular; frame-corner radius is disabled for circles. Disc geometry (centre, inner/outer radius, viewBox, clip path) and the adjacency-aware `pieceColors` are memoised and fed to both previews.
 - **`components/PuzzlePreview.tsx`** (2D) — optional `viewBox`, `clipPathD`, and `pieceColors`. Circular panels use a disc-centred viewBox, clip pieces to the inner circle, stroke the inner frame edge, and fill the frame in Bark Brown.
 - **`components/Puzzle3D.tsx`** (3D) — optional `clip` and `pieceColors`. For a coaster the baseboard is a disc (cylinder) and the extruded pieces are clipped to the puzzle circle with a ring of 96 radial clipping planes (`renderer.localClippingEnabled`). The group is centred on the **disc centre** (not the canvas centre) so OrbitControls orbits the middle of the coaster, not its edge. Baseboard is Bark Brown; pieces use the bright `pieceColors`.
-
-## Tests added this session
-
-- `backend/.../generator/CirclePanelTest.java` — square-arg parity (circle overloads with `SQUARE` reproduce the legacy output), circle differs from square, 110 mm canvas + clip present, arc-based disc frame, inner-ring radius tracks frame size, all four circle exports are well-formed XML.
-- `backend/.../api/CirclePanelApiTest.java` — circle reports the diameter as the canvas size, export has the disc frame + clip, and an omitted panel still defaults to a square (108 mm).
-- `frontend/tests/circle-preview.test.tsx` — centred viewBox, inner-disc clip, and that the square panel adds no clip.
