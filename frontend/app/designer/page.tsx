@@ -1,11 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCart } from "@/components/CartContext";
 import PuzzlePreview from "@/components/PuzzlePreview";
 import { downloadBlob, exportPuzzle, generatePuzzle } from "@/lib/api";
 import { formatPrice } from "@/lib/cart";
+import { assignPieceColors } from "@/lib/palette";
 import {
   DEFAULT_PARAMS,
   MATERIAL_LABELS,
@@ -42,6 +43,7 @@ const EXPORTS: Array<{ mode: ExportMode; label: string; hint: string }> = [
 
 export default function DesignerPage() {
   const [params, setParams] = useState<PuzzleParams>(DEFAULT_PARAMS);
+  const [genParams, setGenParams] = useState<PuzzleParams>(DEFAULT_PARAMS);
   const [result, setResult] = useState<GenerateResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,10 @@ export default function DesignerPage() {
     setError(null);
     try {
       const res = await generatePuzzle(p);
-      if (ticket === generationRef.current) setResult(res);
+      if (ticket === generationRef.current) {
+        setResult(res);
+        setGenParams(p);
+      }
     } catch (e) {
       if (ticket === generationRef.current) setError((e as Error).message);
     } finally {
@@ -91,9 +96,13 @@ export default function DesignerPage() {
   const addToCart = () => {
     const pinned = pinnedParams();
     if (!pinned || !result) return;
+    const sizeLabel =
+      pinned.panelShape === "CIRCLE"
+        ? `Ø${Math.round(result.widthMm)}mm coaster`
+        : `${Math.round(result.widthMm)}×${Math.round(result.heightMm)}mm`;
     cart.add({
       kind: "custom",
-      name: `Custom puzzle ${Math.round(result.widthMm)}×${Math.round(result.heightMm)}mm (seed ${Math.round(result.seedUsed)})`,
+      name: `Custom puzzle ${sizeLabel} (seed ${Math.round(result.seedUsed)})`,
       material,
       unitPriceCents: result.priceCentsByMaterial[material],
       quantity: 1,
@@ -104,8 +113,38 @@ export default function DesignerPage() {
     setTimeout(() => setAdded(false), 1800);
   };
 
-  const widthMm = params.ncols * 2 * params.tileRadius + 2 * params.frame;
-  const heightMm = params.nrows * 2 * params.tileRadius + 2 * params.frame;
+  const isCircle = params.panelShape === "CIRCLE";
+  const widthMm = isCircle ? params.panelDiameter : params.ncols * 2 * params.tileRadius + 2 * params.frame;
+  const heightMm = isCircle ? params.panelDiameter : params.nrows * 2 * params.tileRadius + 2 * params.frame;
+
+  // Geometry for the circular panel, derived from the params the *result* was
+  // generated with (so it always matches the framePath the backend returned).
+  // The grid is centred on the disc; the outer circle (diameter) is the coaster
+  // edge and the inner circle (outer − frame) is the puzzle area the pieces are
+  // clipped to. Memoised so the 3D clip object stays referentially stable.
+  const circle = useMemo(() => {
+    if (genParams.panelShape !== "CIRCLE") return null;
+    const outerR = genParams.panelDiameter / 2;
+    const innerR = Math.max(0, outerR - genParams.frame);
+    const cx = genParams.frame + genParams.ncols * genParams.tileRadius;
+    const cy = genParams.frame + genParams.nrows * genParams.tileRadius;
+    const circlePath = (r: number) =>
+      `M${cx - r},${cy} A ${r} ${r} 0 0,1 ${cx + r} ${cy} A ${r} ${r} 0 0,1 ${cx - r} ${cy} Z`;
+    return {
+      cx,
+      cy,
+      outerR,
+      innerR,
+      viewBox: `${cx - outerR} ${cy - outerR} ${genParams.panelDiameter} ${genParams.panelDiameter}`,
+      clipPathD: circlePath(innerR),
+    };
+  }, [genParams]);
+
+  // Bright per-piece colours, assigned so no two touching pieces match.
+  const pieceColors = useMemo(
+    () => (result ? assignPieceColors(result.piecePaths) : []),
+    [result],
+  );
 
   return (
     <>
@@ -151,6 +190,31 @@ export default function DesignerPage() {
           )}
 
           <label>
+            Panel shape
+            <select
+              value={params.panelShape}
+              onChange={(e) => set("panelShape", e.target.value as PuzzleParams["panelShape"])}
+            >
+              <option value="SQUARE">Square tray</option>
+              <option value="CIRCLE">Round coaster</option>
+            </select>
+          </label>
+
+          {isCircle && (
+            <label>
+              Coaster diameter (mm)
+              <input
+                type="number"
+                step={1}
+                min={10}
+                max={2000}
+                value={params.panelDiameter}
+                onChange={(e) => set("panelDiameter", Number(e.target.value) || 110)}
+              />
+            </label>
+          )}
+
+          <label>
             Tile shape
             <select
               value={params.shape}
@@ -184,8 +248,14 @@ export default function DesignerPage() {
           </label>
           <label>
             Frame corner radius (mm)
-            <input type="number" step={0.5} min={0} value={params.frameCorner}
-              onChange={(e) => set("frameCorner", Number(e.target.value) || 0)} />
+            <input
+              type="number"
+              step={0.5}
+              min={0}
+              value={params.frameCorner}
+              disabled={isCircle}
+              onChange={(e) => set("frameCorner", Number(e.target.value) || 0)}
+            />
           </label>
           <label>
             Min piece size (tiles)
@@ -199,8 +269,17 @@ export default function DesignerPage() {
           </label>
 
           <p className="muted" style={{ margin: 0 }}>
-            Finished size: {Math.round(widthMm)} × {Math.round(heightMm)} mm
+            {isCircle
+              ? `Finished size: Ø${Math.round(widthMm)} mm round`
+              : `Finished size: ${Math.round(widthMm)} × ${Math.round(heightMm)} mm`}
           </p>
+          {isCircle && (
+            <p className="muted" style={{ margin: 0 }}>
+              The grid is centred on the disc and trimmed to the edge — the frame size sets the
+              width of the border ring. Size the grid (columns × rows × tile radius) so it fills
+              the diameter you want.
+            </p>
+          )}
 
           <button className="button" onClick={() => generate(params)} disabled={busy}>
             {busy ? "Generating…" : "Generate jigsaw"}
@@ -240,6 +319,9 @@ export default function DesignerPage() {
                 heightMm={result.heightMm}
                 piecePaths={result.piecePaths}
                 framePath={result.framePath}
+                viewBox={circle?.viewBox}
+                clipPathD={circle?.clipPathD}
+                pieceColors={pieceColors}
               />
             )}
             {result && view === "3d" && (
@@ -249,6 +331,8 @@ export default function DesignerPage() {
                 piecePaths={result.piecePaths}
                 material={material}
                 thickness={material === "WALNUT" ? 4 : 3}
+                clip={circle ? { cx: circle.cx, cy: circle.cy, outerR: circle.outerR, innerR: circle.innerR } : undefined}
+                pieceColors={pieceColors}
               />
             )}
           </div>

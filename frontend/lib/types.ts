@@ -1,5 +1,8 @@
 export type TileShape = "CIRCULAR" | "OCTAGONAL" | "SQUARE";
 
+/** Overall outline of the finished puzzle. */
+export type PanelShape = "SQUARE" | "CIRCLE";
+
 export type Material = "BIRCH_PLY" | "WALNUT" | "ACRYLIC_CLEAR" | "ACRYLIC_BLACK";
 
 export const MATERIAL_LABELS: Record<Material, string> = {
@@ -20,6 +23,9 @@ export interface PuzzleParams {
   minPieceSize: number;
   maxPieceSize: number;
   shape: TileShape;
+  panelShape: PanelShape;
+  /** Disc diameter in mm; only used when panelShape === "CIRCLE". */
+  panelDiameter: number;
 }
 
 export interface GenerateResponse {
@@ -75,6 +81,9 @@ export interface OrderConfirmation {
   itemCount: number;
 }
 
+/** Default coaster diameter (mm) when a circular panel is selected. */
+export const DEFAULT_PANEL_DIAMETER = 110;
+
 export const DEFAULT_PARAMS: PuzzleParams = {
   seed: 4242,
   nonDeterministic: false,
@@ -86,6 +95,8 @@ export const DEFAULT_PARAMS: PuzzleParams = {
   minPieceSize: 4,
   maxPieceSize: 50,
   shape: "CIRCULAR",
+  panelShape: "SQUARE",
+  panelDiameter: DEFAULT_PANEL_DIAMETER,
 };
 
 export function productToParams(p: Product): PuzzleParams {
@@ -100,5 +111,8 @@ export function productToParams(p: Product): PuzzleParams {
     minPieceSize: p.minPieceSize,
     maxPieceSize: p.maxPieceSize,
     shape: p.shape,
+    // Catalogue products are square trays; circular panels are designer-only.
+    panelShape: "SQUARE",
+    panelDiameter: DEFAULT_PANEL_DIAMETER,
   };
 }
