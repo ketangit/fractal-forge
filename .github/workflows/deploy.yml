@@ -101,3 +101,24 @@ jobs:
             --cache-to "type=inline" \
             --push \
             .
+
+      - name: Deploy to Cloud Run
+        run: |
+          # Roll the freshly pushed, immutable :$SHA image out to the
+          # fractal-forge Cloud Run service. The container is the combined
+          # jar (frontend static export served by Spring Boot on 8080).
+          # --allow-unauthenticated makes it publicly reachable; no custom
+          # domain is mapped here — the run.app URL is printed below.
+          gcloud run deploy fractal-forge \
+            --image "${{ env.IMAGE }}:${{ github.sha }}" \
+            --region "${{ env.REGION }}" \
+            --platform managed \
+            --port 8080 \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Show service URL
+        run: |
+          gcloud run services describe fractal-forge \
+            --region "${{ env.REGION }}" --platform managed \
+            --format="value(status.url)"
