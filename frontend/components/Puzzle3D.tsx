@@ -164,7 +164,7 @@ export default function Puzzle3D({
         transparent: style.opacity < 1,
         opacity: style.opacity,
         side: THREE.DoubleSide, // group has a negative Y scale (SVG y-down)
-        clippingPlanes: clipPlanes.length ? clipPlanes : null,
+        clippingPlanes: clipPlanes.length ? clipPlanes : undefined,
       });
       const mesh = new THREE.Mesh(geometry, mat);
       // tiny random lift so pieces read as individually cut
