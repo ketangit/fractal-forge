@@ -13,8 +13,10 @@ concurrency:
 
 env:
   REGION: us-east1
-  # Artifact Registry image path — fractal-forge repo was provisioned by tf-gcp-config
-  IMAGE: us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/fractal-forge
+  # Artifact Registry path must be LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE.
+  # `fractal-forge` is the repository; `app` is the image within it. Omitting the
+  # image segment points manifests at the repo root and pushes fail with 400.
+  IMAGE: us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/fractal-forge/app
 
 jobs:
   test:
