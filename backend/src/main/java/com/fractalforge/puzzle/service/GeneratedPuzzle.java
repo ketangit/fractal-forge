@@ -13,17 +13,19 @@ public record GeneratedPuzzle(PuzzleSpec spec, CircleFractalJigsaw jigsaw, doubl
 	}
 
 	public String framePath() {
-		return jigsaw.createFrame(spec.frame, spec.tileRadius, spec.frameCorner);
+		return jigsaw.createFrame(spec.frame, spec.tileRadius, spec.frameCorner, spec.panelShape, spec.panelDiameter);
 	}
 
 	public String export(ExportMode mode) {
 		return switch (mode) {
-			case OVERLAP -> jigsaw.exportSvg(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner);
-			case NON_OVERLAP -> jigsaw.exportSvgNoOverlap(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner);
-			case NON_OVERLAP_SINGLE_PATH ->
-				jigsaw.exportSvgNoOverlapSinglePath(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner);
-			case COLORED ->
-				jigsaw.exportSvgColored(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner, coloringSeed);
+			case OVERLAP -> jigsaw.exportSvg(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner, spec.panelShape,
+					spec.panelDiameter);
+			case NON_OVERLAP -> jigsaw.exportSvgNoOverlap(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner,
+					spec.panelShape, spec.panelDiameter);
+			case NON_OVERLAP_SINGLE_PATH -> jigsaw.exportSvgNoOverlapSinglePath(spec.frame, spec.tileRadius, spec.shape,
+					spec.frameCorner, spec.panelShape, spec.panelDiameter);
+			case COLORED -> jigsaw.exportSvgColored(spec.frame, spec.tileRadius, spec.shape, spec.frameCorner,
+					coloringSeed, spec.panelShape, spec.panelDiameter);
 		};
 	}
 }
