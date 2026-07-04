@@ -39,9 +39,18 @@ public class WebConfig implements WebMvcConfigurer {
 
 	@Override
 	public void addCorsMappings(CorsRegistry registry) {
-		// Convenience for local development (next dev on :3000); in the
-		// single-container deployment everything is same-origin.
+		// Browsers attach an Origin header to every POST, and behind the
+		// Cloud Run / Firebase Hosting proxies the container sees
+		// http://<host>:8080, so even "same-origin" calls fail Spring's
+		// origin check unless the public origins are allowed here (the
+		// forwarded-header strategy in application.properties covers the
+		// scheme, but not the Hosting preview-channel hosts).
 		// Only the verbs the API actually serves; no PUT/DELETE endpoints exist.
-		registry.addMapping("/api/**").allowedOrigins("http://localhost:3000").allowedMethods("GET", "POST");
+		registry.addMapping("/api/**")
+				.allowedOriginPatterns("https://craftedbyk.com", "https://www.craftedbyk.com",
+						"https://craftedbyk-prod.web.app", "https://craftedbyk-prod--*.web.app",
+						"https://craftedbyk-prod.firebaseapp.com", "https://fractal-forge-csmuhhgvva-ue.a.run.app",
+						"http://localhost:3000")
+				.allowedMethods("GET", "POST");
 	}
 }

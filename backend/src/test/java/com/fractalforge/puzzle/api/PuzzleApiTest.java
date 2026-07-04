@@ -80,4 +80,23 @@ class PuzzleApiTest {
 		mvc.perform(post("/api/puzzle/generate").contentType(MediaType.APPLICATION_JSON).content(invalid))
 				.andExpect(status().isBadRequest());
 	}
+
+	// Browsers send an Origin header on every POST; behind the Cloud Run /
+	// Firebase Hosting proxies these origins must be explicitly allowed or
+	// Spring rejects the call with "Invalid CORS request" (403).
+	@Test
+	void allowsBrowserPostsFromProductionOrigins() throws Exception {
+		for (String origin : new String[]{"https://craftedbyk.com", "https://craftedbyk-prod.web.app",
+				"https://craftedbyk-prod--pr-10-abc123.web.app"}) {
+			mvc.perform(post("/api/puzzle/generate").header("Origin", origin)
+					.contentType(MediaType.APPLICATION_JSON).content(VALID)).andExpect(status().isOk())
+					.andExpect(header().string("Access-Control-Allow-Origin", origin));
+		}
+	}
+
+	@Test
+	void rejectsBrowserPostsFromUnknownOrigins() throws Exception {
+		mvc.perform(post("/api/puzzle/generate").header("Origin", "https://evil.example")
+				.contentType(MediaType.APPLICATION_JSON).content(VALID)).andExpect(status().isForbidden());
+	}
 }
