@@ -53,7 +53,7 @@ jobs:
           npx firebase-tools@15 hosting:channel:deploy "pr-${{ github.event.number }}" \
             --project craftedbyk-prod \
             --expires 7d \
-            --json > deploy.json
+            --json > deploy.json || { echo "::error::firebase deploy failed"; cat deploy.json; exit 1; }
           cat deploy.json
           URL=$(node -e "const r=require('./deploy.json');console.log(Object.values(r.result)[0].url)")
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
