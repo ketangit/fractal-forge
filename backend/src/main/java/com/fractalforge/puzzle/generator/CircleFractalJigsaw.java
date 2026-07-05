@@ -18,8 +18,8 @@ import java.util.Set;
  * The puzzle pieces are independent of the overall {@link PanelShape}: a square
  * (rounded-rectangle) tray and a circular coaster share identical piece
  * geometry. The panel only changes the outer frame outline, the SVG canvas, and
- * — for the circular coaster — a clip applied to the pieces so they are trimmed
- * to the disc.
+ * — for the circular coaster — the pieces are geometrically trimmed to the
+ * disc, so exports contain no cut lines outside the puzzle circle.
  */
 public final class CircleFractalJigsaw {
 
@@ -547,15 +547,18 @@ public final class CircleFractalJigsaw {
 	// ---------------------------------------------------------------------------
 	// Circular ("coaster") panel support.
 	//
+	// Pieces are geometrically trimmed to the disc — see DiscClipper.
+	//
 	// The piece geometry above is panel-agnostic. The overloads below add a second
 	// panel shape: a round disc. When the requested panel is SQUARE they delegate
 	// to the original methods verbatim, so the square output (and the golden-file
 	// tests that pin it) is unaffected. When the panel is CIRCLE they emit a round
 	// frame, a square SVG canvas sized to the diameter and centred on the disc,
-	// and clip the pieces to the disc so the coaster has a clean round edge.
+	// and geometrically trim the pieces to the inner disc (see DiscClipper): arcs
+	// are split exactly at the circle boundary and anything outside is dropped,
+	// so laser controllers (which ignore SVG clip paths) never cut outside the
+	// puzzle circle or into the frame ring.
 	// ---------------------------------------------------------------------------
-
-	private static final String PANEL_CLIP_ID = "panel-clip";
 
 	/**
 	 * Grid centre X in millimetres (pieces are inset from the canvas by
@@ -573,7 +576,7 @@ public final class CircleFractalJigsaw {
 	/**
 	 * Frame cut lines for a circular panel: the inner edge of the frame ring (only
 	 * when {@code frame > 0}) plus the outer disc edge. Both are real cut paths so
-	 * the frame is a solid annulus around the clipped puzzle.
+	 * the frame is a solid annulus around the trimmed puzzle.
 	 */
 	private String circlePanelFrameElements(double cx, double cy, double outerR, double innerR, double frame) {
 		StringBuilder sb = new StringBuilder();
@@ -598,17 +601,22 @@ public final class CircleFractalJigsaw {
 
 	/**
 	 * SVG header for a circular panel: square canvas of {@code diameter}, centred
-	 * on the disc.
+	 * on the disc. No clip path is emitted — pieces are geometrically trimmed to
+	 * the disc instead.
 	 */
-	private String svgHeaderCircle(double cx, double cy, double r, double diameter, String circleD) {
+	private String svgHeaderCircle(double cx, double cy, double r, double diameter) {
 		double minX = cx - r;
 		double minY = cy - r;
 		return "<?xml version=\"1.0\" encoding=\"utf-8\" ?><svg baseProfile=\"full\" height=\"" + Svg.fmt(diameter)
 				+ "mm\" version=\"1.1\" viewBox=\"" + Svg.fmt(minX) + " " + Svg.fmt(minY) + " " + Svg.fmt(diameter)
 				+ " " + Svg.fmt(diameter) + "\" width=\"" + Svg.fmt(diameter)
 				+ "mm\" xmlns=\"http://www.w3.org/2000/svg\"" + " xmlns:ev=\"http://www.w3.org/2001/xml-events\""
-				+ " xmlns:xlink=\"http://www.w3.org/1999/xlink\"><defs><clipPath id=\"" + PANEL_CLIP_ID
-				+ "\"><path d=\"" + circleD + "\"></path></clipPath></defs>";
+				+ " xmlns:xlink=\"http://www.w3.org/1999/xlink\"><defs />";
+	}
+
+	/** Point-coincidence test used when stitching trimmed segments together. */
+	private static boolean near(double x1, double y1, double x2, double y2) {
+		return Math.abs(x1 - x2) <= DiscClipper.EPS && Math.abs(y1 - y2) <= DiscClipper.EPS;
 	}
 
 	/**
@@ -634,20 +642,36 @@ public final class CircleFractalJigsaw {
 		double innerR = Math.max(0, outerR - frame);
 		double cx = gridCenterX(frame, rad);
 		double cy = gridCenterY(frame, rad);
-		String clipD = circleFramePath(cx, cy, innerR);
-		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter, clipD));
-		data.append("<g clip-path=\"url(#").append(PANEL_CLIP_ID).append(")\">");
+		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter));
 		for (List<DiagonalConnection> p : pieces) {
 			List<Arc> arcs = new ArrayList<Arc>();
 			addArcs(p.get(0), p, arcs, rad, frame, true);
-			data.append("<path fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" d=\"M")
-					.append(Svg.fmt(arcs.get(0).spx())).append(",").append(Svg.fmt(arcs.get(0).spy())).append(" ");
+			List<DiscClipper.Seg> segs = new ArrayList<DiscClipper.Seg>();
 			for (Arc a : arcs) {
-				data.append(a.svg(shape));
+				segs.addAll(DiscClipper.clip(a, shape, cx, cy, innerR));
 			}
-			data.append("Z\"></path>");
+			if (segs.isEmpty()) {
+				continue; // piece lies entirely outside the disc
+			}
+			StringBuilder d = new StringBuilder();
+			double startX = 0, startY = 0;
+			double curX = Double.NaN, curY = Double.NaN;
+			for (DiscClipper.Seg s : segs) {
+				if (Double.isNaN(curX) || !near(curX, curY, s.sx, s.sy)) {
+					d.append("M").append(Svg.fmt(s.sx)).append(",").append(Svg.fmt(s.sy)).append(" ");
+					startX = s.sx;
+					startY = s.sy;
+				}
+				d.append(s.svg());
+				curX = s.ex;
+				curY = s.ey;
+			}
+			if (near(curX, curY, startX, startY)) {
+				d.append("Z");
+			}
+			data.append("<path fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" d=\"").append(d)
+					.append("\"></path>");
 		}
-		data.append("</g>");
 		data.append(circlePanelFrameElements(cx, cy, outerR, innerR, frame));
 		data.append("</svg>");
 		return data.toString();
@@ -663,30 +687,32 @@ public final class CircleFractalJigsaw {
 		double innerR = Math.max(0, outerR - frame);
 		double cx = gridCenterX(frame, rad);
 		double cy = gridCenterY(frame, rad);
-		String clipD = circleFramePath(cx, cy, innerR);
-		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter, clipD));
-		data.append("<g clip-path=\"url(#").append(PANEL_CLIP_ID).append(")\">");
+		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter));
 		Set<String> allArcs = new LinkedHashSet<String>();
 		for (List<DiagonalConnection> p : pieces) {
 			boolean inPath = false;
 			StringBuilder path = new StringBuilder();
+			double curX = 0, curY = 0;
 			List<Arc> arcs = new ArrayList<Arc>();
 			addArcs(p.get(0), p, arcs, rad, frame, true);
 			for (Arc a : arcs) {
 				if (allArcs.contains(a.key())) {
-					if (inPath) {
-						path.append("\"></path>");
-						data.append(path);
-						inPath = false;
-					}
-				} else {
-					allArcs.add(a.key());
-					if (!inPath) {
+					continue;
+				}
+				allArcs.add(a.key());
+				for (DiscClipper.Seg s : DiscClipper.clip(a, shape, cx, cy, innerR)) {
+					if (!inPath || !near(curX, curY, s.sx, s.sy)) {
+						if (inPath) {
+							path.append("\"></path>");
+							data.append(path);
+						}
 						path = new StringBuilder("<path fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" d=\"M")
-								.append(Svg.fmt(a.spx())).append(",").append(Svg.fmt(a.spy())).append(" ");
+								.append(Svg.fmt(s.sx)).append(",").append(Svg.fmt(s.sy)).append(" ");
 						inPath = true;
 					}
-					path.append(a.svg(shape));
+					path.append(s.svg());
+					curX = s.ex;
+					curY = s.ey;
 				}
 			}
 			if (inPath) {
@@ -694,7 +720,6 @@ public final class CircleFractalJigsaw {
 				data.append(path);
 			}
 		}
-		data.append("</g>");
 		data.append(circlePanelFrameElements(cx, cy, outerR, innerR, frame));
 		data.append("</svg>");
 		return data.toString();
@@ -710,29 +735,29 @@ public final class CircleFractalJigsaw {
 		double innerR = Math.max(0, outerR - frame);
 		double cx = gridCenterX(frame, rad);
 		double cy = gridCenterY(frame, rad);
-		String clipD = circleFramePath(cx, cy, innerR);
-		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter, clipD));
-		data.append("<g clip-path=\"url(#").append(PANEL_CLIP_ID).append(")\">");
+		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter));
 		Set<String> allArcs = new LinkedHashSet<String>();
 		data.append("<path fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" d=\"");
-		double curX = -1, curY = -1;
+		double curX = Double.NaN, curY = Double.NaN;
 		for (List<DiagonalConnection> p : pieces) {
 			List<Arc> arcs = new ArrayList<Arc>();
 			addArcs(p.get(0), p, arcs, rad, frame, true);
 			for (Arc a : arcs) {
-				if (!allArcs.contains(a.key())) {
-					allArcs.add(a.key());
-					if (!a.spEquals(curX, curY)) {
-						data.append("M").append(Svg.fmt(a.spx())).append(",").append(Svg.fmt(a.spy())).append(" ");
+				if (allArcs.contains(a.key())) {
+					continue;
+				}
+				allArcs.add(a.key());
+				for (DiscClipper.Seg s : DiscClipper.clip(a, shape, cx, cy, innerR)) {
+					if (Double.isNaN(curX) || !near(curX, curY, s.sx, s.sy)) {
+						data.append("M").append(Svg.fmt(s.sx)).append(",").append(Svg.fmt(s.sy)).append(" ");
 					}
-					data.append(a.svg(shape));
-					curX = a.epx();
-					curY = a.epy();
+					data.append(s.svg());
+					curX = s.ex;
+					curY = s.ey;
 				}
 			}
 		}
 		data.append("\"></path>");
-		data.append("</g>");
 		data.append(circlePanelFrameElements(cx, cy, outerR, innerR, frame));
 		data.append("</svg>");
 		return data.toString();
@@ -750,7 +775,12 @@ public final class CircleFractalJigsaw {
 		return sb.toString();
 	}
 
-	/** Colored export, panel-aware. */
+	/**
+	 * Colored export, panel-aware. For the circular panel each piece is the true
+	 * intersection of the piece shape with the inner disc: the outline is trimmed
+	 * at the circle and the gaps are bridged along the circle boundary, so the
+	 * filled shapes never extend outside the puzzle circle.
+	 */
 	public String exportSvgColored(double frame, double rad, TileShape shape, double frameCorner, double coloringSeed,
 			PanelShape panel, double diameter) {
 		if (panel != PanelShape.CIRCLE) {
@@ -760,19 +790,143 @@ public final class CircleFractalJigsaw {
 		double innerR = Math.max(0, outerR - frame);
 		double cx = gridCenterX(frame, rad);
 		double cy = gridCenterY(frame, rad);
-		String clipD = circleFramePath(cx, cy, innerR);
-		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter, clipD));
-		data.append("<g clip-path=\"url(#").append(PANEL_CLIP_ID).append(")\">");
+		StringBuilder data = new StringBuilder(svgHeaderCircle(cx, cy, outerR, diameter));
+		// Colours are assigned over ALL pieces (as in the frontend preview), then
+		// pieces outside the disc are simply not emitted — so the remaining pieces
+		// keep the exact colourway shown on screen.
 		List<String> colors = assignPieceColors(frame, rad);
-		List<String> paths = multipaths(frame, rad, shape);
-		for (int i = 0; i < paths.size(); i++) {
+		for (int i = 0; i < pieces.size(); i++) {
+			List<Arc> arcs = new ArrayList<Arc>();
+			addArcs(pieces.get(i).get(0), pieces.get(i), arcs, rad, frame, true);
+			List<DiscClipper.Seg> segs = new ArrayList<DiscClipper.Seg>();
+			for (Arc a : arcs) {
+				segs.addAll(DiscClipper.clip(a, shape, cx, cy, innerR));
+			}
+			if (segs.isEmpty()) {
+				continue; // piece lies entirely outside the disc
+			}
+			int sweep = pieceWinding(arcs) > 0 ? 1 : 0;
+			String d = trimmedPieceOutline(segs, cx, cy, innerR, sweep);
 			data.append("<path fill=\"").append(colors.get(i)).append("\" stroke=\"").append(BARK_BROWN)
-					.append("\" stroke-width=\"").append(Svg.fmt(rad / 20.0)).append("\" d=\"").append(paths.get(i))
+					.append("\" stroke-width=\"").append(Svg.fmt(rad / 20.0)).append("\" d=\"").append(d)
 					.append("\"></path>");
 		}
-		data.append("</g>");
 		data.append(coloredCirclePanelFrameElements(cx, cy, outerR, innerR, frame));
 		data.append("</svg>");
 		return data.toString();
+	}
+
+	/**
+	 * Shoelace sign over the piece's arc-chain start points. Positive means the
+	 * outline runs in the SVG positive-angle (sweep = 1) direction, which is the
+	 * direction disc-boundary bridges must follow to enclose the same interior.
+	 */
+	private static double pieceWinding(List<Arc> arcs) {
+		double s = 0;
+		int n = arcs.size();
+		for (int i = 0; i < n; i++) {
+			Arc a = arcs.get(i);
+			Arc b = arcs.get((i + 1) % n);
+			s += a.spx() * b.spy() - b.spx() * a.spy();
+		}
+		return s;
+	}
+
+	/**
+	 * Builds the closed outline(s) of a trimmed piece (piece ∩ disc) as SVG path
+	 * data. The kept segments are grouped into contiguous runs; each run's exit
+	 * point is joined along the disc boundary to the <em>next entry point around
+	 * the circle</em> in the winding direction (Weiler–Atherton pairing — a fractal
+	 * piece can cross the boundary many times, so pairing runs in traversal order
+	 * would bridge the wrong way around the disc). The intersection may split into
+	 * several loops; each becomes its own closed subpath.
+	 */
+	private static String trimmedPieceOutline(List<DiscClipper.Seg> segs, double cx, double cy, double r, int sweep) {
+		// Group contiguous segments into runs.
+		List<List<DiscClipper.Seg>> runs = new ArrayList<List<DiscClipper.Seg>>();
+		List<DiscClipper.Seg> run = new ArrayList<DiscClipper.Seg>();
+		for (DiscClipper.Seg s : segs) {
+			if (!run.isEmpty()) {
+				DiscClipper.Seg prev = run.get(run.size() - 1);
+				if (!near(prev.ex, prev.ey, s.sx, s.sy)) {
+					runs.add(run);
+					run = new ArrayList<DiscClipper.Seg>();
+				}
+			}
+			run.add(s);
+		}
+		runs.add(run);
+		// The outline is closed, so if the last run flows into the first they are
+		// one run that happens to wrap around the traversal start.
+		if (runs.size() > 1) {
+			List<DiscClipper.Seg> first = runs.get(0);
+			List<DiscClipper.Seg> last = runs.get(runs.size() - 1);
+			DiscClipper.Seg le = last.get(last.size() - 1);
+			DiscClipper.Seg fs = first.get(0);
+			if (near(le.ex, le.ey, fs.sx, fs.sy)) {
+				last.addAll(first);
+				runs.set(0, last);
+				runs.remove(runs.size() - 1);
+			}
+		}
+		StringBuilder d = new StringBuilder();
+		boolean[] used = new boolean[runs.size()];
+		for (int start = 0; start < runs.size(); start++) {
+			if (used[start]) {
+				continue;
+			}
+			List<DiscClipper.Seg> sr = runs.get(start);
+			double loopX = sr.get(0).sx, loopY = sr.get(0).sy;
+			if (d.length() > 0) {
+				d.append(" "); // separate subpaths: "Z M…", not "ZM…"
+			}
+			d.append("M").append(Svg.fmt(loopX)).append(",").append(Svg.fmt(loopY)).append(" ");
+			int cur = start;
+			while (true) {
+				used[cur] = true;
+				List<DiscClipper.Seg> cr = runs.get(cur);
+				for (DiscClipper.Seg s : cr) {
+					d.append(s.svg());
+				}
+				DiscClipper.Seg end = cr.get(cr.size() - 1);
+				if (near(end.ex, end.ey, loopX, loopY)) {
+					break; // loop closed on the piece outline itself
+				}
+				// Bridge along the circle to the closest entry point in the
+				// winding direction; that may be this loop's own start.
+				double exitAng = StrictMath.atan2(end.ey - cy, end.ex - cx);
+				int next = -1;
+				double best = Double.MAX_VALUE;
+				for (int j = 0; j < runs.size(); j++) {
+					if (used[j] && j != start) {
+						continue;
+					}
+					DiscClipper.Seg js = runs.get(j).get(0);
+					double entryAng = StrictMath.atan2(js.sy - cy, js.sx - cx);
+					double delta = sweep == 1 ? entryAng - exitAng : exitAng - entryAng;
+					while (delta <= 0) {
+						delta += 2 * Math.PI;
+					}
+					while (delta > 2 * Math.PI) {
+						delta -= 2 * Math.PI;
+					}
+					if (delta < best) {
+						best = delta;
+						next = j;
+					}
+				}
+				DiscClipper.Seg ns = runs.get(next).get(0);
+				int large = best > Math.PI ? 1 : 0;
+				d.append("A ").append(Svg.fmt(r)).append(" ").append(Svg.fmt(r)).append(" 0 ").append(large).append(",")
+						.append(sweep).append(" ").append(Svg.fmt(ns.sx)).append(" ").append(Svg.fmt(ns.sy))
+						.append(" ");
+				if (next == start) {
+					break; // bridged back to the loop start
+				}
+				cur = next;
+			}
+			d.append("Z");
+		}
+		return d.toString();
 	}
 }

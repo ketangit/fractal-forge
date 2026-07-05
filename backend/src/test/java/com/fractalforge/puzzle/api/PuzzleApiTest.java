@@ -88,8 +88,8 @@ class PuzzleApiTest {
 	void allowsBrowserPostsFromProductionOrigins() throws Exception {
 		for (String origin : new String[]{"https://craftedbyk.com", "https://craftedbyk-prod.web.app",
 				"https://craftedbyk-prod--pr-10-abc123.web.app"}) {
-			mvc.perform(post("/api/puzzle/generate").header("Origin", origin)
-					.contentType(MediaType.APPLICATION_JSON).content(VALID)).andExpect(status().isOk())
+			mvc.perform(post("/api/puzzle/generate").header("Origin", origin).contentType(MediaType.APPLICATION_JSON)
+					.content(VALID)).andExpect(status().isOk())
 					.andExpect(header().string("Access-Control-Allow-Origin", origin));
 		}
 	}
