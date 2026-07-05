@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,13 +48,78 @@ class CirclePanelTest {
 	}
 
 	@Test
-	void circlePanelCanvasMatchesDiameterAndClipsPieces() {
+	void circlePanelCanvasMatchesDiameterAndTrimsPieces() {
 		CircleFractalJigsaw jig = generate(42, 8, 8, 4, 12);
 		String svg = jig.exportSvg(6, 6, TileShape.CIRCULAR, 4, PanelShape.CIRCLE, 110);
 		assertTrue(svg.contains("width=\"110mm\""), "coaster canvas should be the requested diameter");
 		assertTrue(svg.contains("height=\"110mm\""), "coaster canvas should be the requested diameter");
-		assertTrue(svg.contains("<clipPath id=\"panel-clip\">"), "pieces must be clipped to the disc");
-		assertTrue(svg.contains("clip-path=\"url(#panel-clip)\""), "pieces must reference the clip");
+		assertFalse(svg.contains("clipPath"), "geometry is trimmed, not masked with a clip path");
+		assertFalse(svg.contains("clip-path"), "geometry is trimmed, not masked with a clip path");
+	}
+
+	/**
+	 * Every coordinate of every path in the export must lie within the disc:
+	 * trimmed piece geometry never extends past the inner puzzle circle, and
+	 * nothing at all extends past the outer coaster edge. (Kept sub-arcs cannot
+	 * bulge outside between endpoints — a crossing would have split them — so
+	 * endpoint checks suffice.)
+	 */
+	@Test
+	void trimmedExportsContainNoGeometryOutsideTheDisc() {
+		CircleFractalJigsaw jig = generate(42, 8, 8, 4, 12);
+		double cx = 54, cy = 54, outerR = 55, innerR = 49; // frame=6, diameter=110
+		TileShape[] shapes = {TileShape.CIRCULAR, TileShape.SQUARE, TileShape.OCTAGONAL};
+		for (TileShape shape : shapes) {
+			String[] svgs = {jig.exportSvg(6, 6, shape, 4, PanelShape.CIRCLE, 110),
+					jig.exportSvgNoOverlap(6, 6, shape, 4, PanelShape.CIRCLE, 110),
+					jig.exportSvgNoOverlapSinglePath(6, 6, shape, 4, PanelShape.CIRCLE, 110),
+					jig.exportSvgColored(6, 6, shape, 4, 4242, PanelShape.CIRCLE, 110)};
+			for (String svg : svgs) {
+				String outerFrameD = "M-1,54 A 55 55 0 0,1 109 54 A 55 55 0 0,1 -1 54 Z";
+				for (String d : extractPathData(svg)) {
+					double limit = d.equals(outerFrameD) ? outerR : innerR;
+					for (double[] pt : pathCoords(d)) {
+						double dist = Math.hypot(pt[0] - cx, pt[1] - cy);
+						assertTrue(dist <= limit + 1e-6, shape + ": point (" + pt[0] + "," + pt[1]
+								+ ") lies outside radius " + limit + " (dist=" + dist + ")");
+					}
+				}
+			}
+		}
+	}
+
+	private static java.util.List<String> extractPathData(String svg) {
+		java.util.List<String> out = new java.util.ArrayList<>();
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("d=\"([^\"]*)\"").matcher(svg);
+		while (m.find()) {
+			out.add(m.group(1));
+		}
+		return out;
+	}
+
+	/**
+	 * Extracts the on-path coordinates (M/L targets and arc endpoints) from a path
+	 * "d" string as emitted by the generator (M, L, A, Z commands only).
+	 */
+	private static java.util.List<double[]> pathCoords(String d) {
+		java.util.List<double[]> pts = new java.util.ArrayList<>();
+		String[] tok = d.trim().split("\\s+");
+		for (int i = 0; i < tok.length; i++) {
+			String t = tok[i];
+			if (t.startsWith("M")) {
+				String[] xy = t.substring(1).split(",");
+				pts.add(new double[]{Double.parseDouble(xy[0]), Double.parseDouble(xy[1])});
+			} else if (t.equals("A")) {
+				// A rx ry xrot largeArc,sweep x y
+				pts.add(new double[]{Double.parseDouble(tok[i + 5]), Double.parseDouble(tok[i + 6])});
+				i += 6;
+			} else if (t.equals("L")) {
+				pts.add(new double[]{Double.parseDouble(tok[i + 1]), Double.parseDouble(tok[i + 2])});
+				i += 2;
+			}
+			// "Z" carries no coordinates
+		}
+		return pts;
 	}
 
 	@Test
@@ -66,15 +132,13 @@ class CirclePanelTest {
 	}
 
 	@Test
-	void circlePanelHasInnerClipRingAndOuterFrameEdge() {
+	void circlePanelHasInnerRingAndOuterFrameEdge() {
 		CircleFractalJigsaw jig = generate(42, 8, 8, 4, 12);
 		// frame=6, diameter=110 => outerR=55, innerR=49, disc centre (54,54).
 		String svg = jig.exportSvgNoOverlap(6, 6, TileShape.CIRCULAR, 4, PanelShape.CIRCLE, 110);
-		// Pieces are clipped to the inner puzzle circle (radius 55 - 6 = 49)...
-		assertTrue(svg.contains("<clipPath id=\"panel-clip\"><path d=\"M5,54 A 49 49 0 0,1"),
-				"clip should use the inner radius (outerR - frame): " + svg);
-		// ...and both the inner frame edge and the outer coaster edge are cut.
-		assertTrue(svg.contains("A 49 49 0 0,1"), "inner frame edge missing");
+		// Both the inner frame edge (radius 55 - 6 = 49) and the outer coaster
+		// edge are real cut paths.
+		assertTrue(svg.contains("d=\"M5,54 A 49 49 0 0,1"), "inner frame edge missing: " + svg);
 		assertTrue(svg.contains("A 55 55 0 0,1"), "outer coaster edge missing");
 	}
 
@@ -83,8 +147,7 @@ class CirclePanelTest {
 		CircleFractalJigsaw jig = generate(42, 8, 8, 4, 12);
 		// frame=10 => disc centre (10+48, 10+48) = (58,58), outerR=55, innerR=45.
 		String svg = jig.exportSvgNoOverlap(10, 6, TileShape.CIRCULAR, 4, PanelShape.CIRCLE, 110);
-		assertTrue(svg.contains("<clipPath id=\"panel-clip\"><path d=\"M13,58 A 45 45 0 0,1"),
-				"inner clip radius should follow the frame size: " + svg);
+		assertTrue(svg.contains("d=\"M13,58 A 45 45 0 0,1"), "inner frame edge should follow the frame size: " + svg);
 		assertTrue(svg.contains("A 55 55 0 0,1"), "outer coaster edge missing");
 	}
 

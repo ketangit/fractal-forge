@@ -52,7 +52,10 @@ class CirclePanelApiTest {
 				.andExpect(status().isOk()).andExpect(content().contentTypeCompatibleWith("image/svg+xml")).andReturn()
 				.getResponse().getContentAsString();
 		org.junit.jupiter.api.Assertions.assertTrue(svg.contains("width=\"110mm\""));
-		org.junit.jupiter.api.Assertions.assertTrue(svg.contains("clip-path=\"url(#panel-clip)\""));
+		// Geometry is trimmed to the disc — no clip path, but both frame rings cut.
+		org.junit.jupiter.api.Assertions.assertFalse(svg.contains("clip-path"));
+		org.junit.jupiter.api.Assertions.assertTrue(svg.contains("A 49 49 0 0,1"));
+		org.junit.jupiter.api.Assertions.assertTrue(svg.contains("A 55 55 0 0,1"));
 	}
 
 	@Test

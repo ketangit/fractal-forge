@@ -129,6 +129,22 @@ public final class Arc {
 		return quad + "|" + cpx + "|" + cpy;
 	}
 
+	double cpx() {
+		return cpx;
+	}
+	double cpy() {
+		return cpy;
+	}
+	double radius() {
+		return rad;
+	}
+	int quad() {
+		return quad;
+	}
+	int sign() {
+		return sign;
+	}
+
 	public double spx() {
 		return spx;
 	}
