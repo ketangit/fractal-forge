@@ -75,6 +75,41 @@ class PuzzleApiTest {
 	}
 
 	@Test
+	void pieceWidthIsEquivalentToTwiceTheTileRadius() throws Exception {
+		// pieceWidth:12 must produce exactly the same puzzle as tileRadius:6.
+		String withPieceWidth = VALID.replace("\"tileRadius\":6.0", "\"pieceWidth\":12.0");
+		String expected = mvc.perform(
+				post("/api/puzzle/export?mode=NON_OVERLAP").contentType(MediaType.APPLICATION_JSON).content(VALID))
+				.andReturn().getResponse().getContentAsString();
+		String actual = mvc
+				.perform(post("/api/puzzle/export?mode=NON_OVERLAP").contentType(MediaType.APPLICATION_JSON)
+						.content(withPieceWidth))
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		org.junit.jupiter.api.Assertions.assertEquals(expected, actual);
+		mvc.perform(post("/api/puzzle/generate").contentType(MediaType.APPLICATION_JSON).content(withPieceWidth))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.widthMm").value(108.0))
+				.andExpect(jsonPath("$.heightMm").value(108.0));
+	}
+
+	@Test
+	void pieceWidthTakesPrecedenceOverTileRadius() throws Exception {
+		// Both present: pieceWidth wins. tileRadius:6 alone would give 108 mm;
+		// pieceWidth:10 (radius 5) gives 8*10 + 12 = 92 mm.
+		String both = VALID.replace("\"tileRadius\":6.0", "\"tileRadius\":6.0,\"pieceWidth\":10.0");
+		mvc.perform(post("/api/puzzle/generate").contentType(MediaType.APPLICATION_JSON).content(both))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.widthMm").value(92.0))
+				.andExpect(jsonPath("$.heightMm").value(92.0));
+	}
+
+	@Test
+	void rejectsMissingTileSize() throws Exception {
+		// Neither tileRadius nor pieceWidth: tileRadius defaults to 0 -> 400.
+		String none = VALID.replace("\"tileRadius\":6.0,", "");
+		mvc.perform(post("/api/puzzle/generate").contentType(MediaType.APPLICATION_JSON).content(none))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
 	void rejectsInvalidGridSize() throws Exception {
 		String invalid = VALID.replace("\"ncols\":8", "\"ncols\":1");
 		mvc.perform(post("/api/puzzle/generate").contentType(MediaType.APPLICATION_JSON).content(invalid))

@@ -237,9 +237,11 @@ export default function DesignerPage() {
               onChange={(e) => set("nrows", Number(e.target.value))} />
           </label>
           <label>
-            Tile radius (mm)
-            <input type="number" step={0.5} min={1} value={params.tileRadius}
-              onChange={(e) => set("tileRadius", Number(e.target.value) || 1)} />
+            Piece width (mm)
+            {/* One puzzle tile/bump is 2 × tileRadius wide; the UI edits the
+                width in mm and stores the radius internally. */}
+            <input type="number" step={1} min={2} value={params.tileRadius * 2}
+              onChange={(e) => set("tileRadius", (Number(e.target.value) || 2) / 2)} />
           </label>
           <label>
             Frame size (mm)
